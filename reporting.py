@@ -218,9 +218,9 @@ def to_pdf(blocks: list[Text | Table], fonts: tuple[str, str]) -> bytes:
         "section": ParagraphStyle("section", fontName=bold, fontSize=16, leading=22, textColor=teal, spaceBefore=14, spaceAfter=8, keepWithNext=True),
         "subheading": ParagraphStyle("subheading", fontName=bold, fontSize=11, leading=16, textColor=navy, spaceBefore=8, spaceAfter=4, keepWithNext=True),
         "finding": ParagraphStyle("finding", fontName=bold, fontSize=10, leading=14, textColor=teal, spaceBefore=5, spaceAfter=3, keepWithNext=True),
-        "body": ParagraphStyle("body", fontName=regular, fontSize=9.4, leading=13.8, textColor=ink, spaceAfter=5),
-        "quote": ParagraphStyle("quote", fontName=regular, fontSize=8.5, leading=12, textColor=grey, leftIndent=10, spaceAfter=5),
-        "bullet": ParagraphStyle("bullet", fontName=regular, fontSize=9.4, leading=13.8, textColor=ink, leftIndent=10, spaceAfter=5),
+        "body": ParagraphStyle("body", fontName=regular, fontSize=9.4, leading=13.4, textColor=ink, spaceAfter=4),
+        "quote": ParagraphStyle("quote", fontName=regular, fontSize=8.5, leading=12, textColor=grey, leftIndent=10, spaceAfter=4),
+        "bullet": ParagraphStyle("bullet", fontName=regular, fontSize=9.4, leading=13.4, textColor=ink, leftIndent=10, spaceAfter=4),
         "cell": ParagraphStyle("cell", fontName=regular, fontSize=8, leading=11.3, textColor=ink),
         "header": ParagraphStyle("header", fontName=bold, fontSize=8, leading=11.3, textColor=colors.white),
     }
