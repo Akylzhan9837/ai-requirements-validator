@@ -24,7 +24,7 @@ cp .env.example .env
 
 Получите ключ в [Google AI Studio](https://aistudio.google.com/api-keys). Для прогона без оплаты выберите проект на Free Tier и оставьте биллинг отключённым. Откройте локальный `.env` и укажите ключ после `GEMINI_API_KEY=`. Переменные окружения имеют приоритет перед этим файлом. `.env` игнорируется Git.
 
-Модель по умолчанию — **Gemini 3.8 Flash** (`gemini-3.8-flash`). Доступ и квоты проверяйте в своём проекте. Другую модель Gemini с поддержкой структурированных ответов можно указать через `GEMINI_MODEL`. Агент передаёт извлечённый текст требований Gemini API. Проверяйте [условия обработки данных](https://aistudio.google.com/docs/terms) для используемого тарифа. [Карточка модели](https://aistudio.google.com/docs/models/gemini-3.8-flash) · [Тарифы](https://aistudio.google.com/docs/pricing#gemini-3.8-flash)
+Модель по умолчанию — **Gemini 3.6 Flash** (`gemini-3.6-flash`). Доступ и квоты проверяйте в своём проекте. Другую модель Gemini с поддержкой структурированных ответов можно указать через `GEMINI_MODEL`. Агент передаёт извлечённый текст требований Gemini API. Проверяйте [условия обработки данных](https://aistudio.google.com/docs/terms) для используемого тарифа. [Карточка модели](https://aistudio.google.com/docs/models/gemini-3.6-flash) · [Тарифы](https://aistudio.google.com/docs/pricing#gemini-3.6-flash)
 
 ## Прогон
 
