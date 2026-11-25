@@ -128,7 +128,7 @@ def review_blocks(document: Document, review: Review, passport: Passport) -> lis
     if not critical:
         add("Критичных дефектов в этом прогоне не обнаружено.")
     for label, owner, issue in critical:
-        places = "; ".join(source.location for source in issue.evidence)
+        places = " / ".join(source.location for source in issue.evidence)
         add(f"{label} · {owner} · {CATEGORIES[issue.category]} · {issue.title} ({places}).", "bullet")
 
     add("6. Готовность к разработке и тестированию", "section")
@@ -173,8 +173,8 @@ def to_markdown(blocks: list[Text | Table]) -> str:
 def pdf_fonts(font: Path | None) -> tuple[str, str]:
     windows_fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
     candidates = [
-        (windows_fonts / "NotoSans-Regular.ttf", windows_fonts / "NotoSans-Bold.ttf"),
         (windows_fonts / "arial.ttf", windows_fonts / "arialbd.ttf"),
+        (windows_fonts / "NotoSans-Regular.ttf", windows_fonts / "NotoSans-Bold.ttf"),
         (Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")),
         (Path("/System/Library/Fonts/Supplemental/Arial.ttf"), Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf")),
     ]

@@ -14,7 +14,7 @@ from source import read_document
 
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "v0.1.0"
+VERSION = "v0.1.1"
 
 
 def version() -> str:

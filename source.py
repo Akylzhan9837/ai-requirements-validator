@@ -52,16 +52,22 @@ class Document:
         if not isinstance(quote, str) or not compact(quote):
             raise ValueError(f"пустая цитата в строках {start}–{end}")
 
-        pieces = [
-            (number, compact(self.lines[number - 1].text))
-            for number in range(start, end + 1)
-            if self.lines[number - 1].text.strip()
-        ]
-        haystack = " ".join(text for _, text in pieces)
         needle = compact(quote)
-        offset = haystack.find(needle)
+
+        def search(first: int, last: int) -> tuple[list[tuple[int, str]], str, int]:
+            pieces = [
+                (number, compact(self.lines[number - 1].text))
+                for number in range(first, last + 1)
+                if self.lines[number - 1].text.strip()
+            ]
+            text = " ".join(value for _, value in pieces)
+            return pieces, text, text.find(needle)
+
+        pieces, haystack, offset = search(start, end)
         if offset < 0:
-            raise ValueError(f"цитата не совпадает с источником в строках {start}–{end}")
+            pieces, haystack, offset = search(max(1, start - 3), min(len(self.lines), end + 3))
+            if offset < 0 or haystack.find(needle, offset + 1) >= 0:
+                raise ValueError(f"цитата не совпадает с источником в строках {start}–{end}")
         cursor = 0
         actual = []
         for number, text in pieces:
