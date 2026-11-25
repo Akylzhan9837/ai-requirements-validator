@@ -15,7 +15,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont, TTFError
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, TableStyle
 
-from review import CATEGORIES, ITEM_CRITERIA, KINDS, SET_CRITERIA, SEVERITIES, STATUSES, Assessment, Review
+from review import CATEGORIES, ITEM_CRITERIA, KINDS, SET_CRITERIA, SEVERITIES, STATUSES, Assessment, Review, ordered_findings
 from source import Document
 
 
@@ -46,18 +46,28 @@ class Table:
 
 def review_blocks(document: Document, review: Review, passport: Passport) -> list[Text | Table]:
     blocks: list[Text | Table] = []
+    issues = ordered_findings(review)
+    duplicates = dict(review.duplicates)
     defects = []
+    labels = {}
+    for index, (owner, issue) in enumerate(issues, 1):
+        if index not in duplicates:
+            label = f"D-{len(defects) + 1:03d}"
+            labels[index] = label
+            defects.append((label, owner, issue))
     issue_number = 0
 
     def add(value: str, style: str = "body") -> None:
         blocks.append(Text(style, value))
 
-    def emit_findings(assessment: Assessment, owner: str, criteria: dict) -> None:
+    def emit_findings(assessment: Assessment, criteria: dict) -> None:
         nonlocal issue_number
         for finding in assessment.findings:
             issue_number += 1
-            label = f"D-{issue_number:03d}"
-            defects.append((label, owner, finding))
+            if issue_number in duplicates:
+                add(f"Связанный дефект: {labels[duplicates[issue_number]]} · {finding.title}.")
+                continue
+            label = labels[issue_number]
             add(f"{label} · {finding.title}", "finding")
             add(
                 f"{SEVERITIES[finding.severity]} · {CATEGORIES[finding.category]} · "
@@ -106,14 +116,14 @@ def review_blocks(document: Document, review: Review, passport: Passport) -> lis
             names = [ITEM_CRITERIA[key][0] for key, value in assessment.checks.items() if value == status]
             if names:
                 add(f"{label}: {', '.join(names)}.")
-        emit_findings(assessment, item.id, ITEM_CRITERIA)
+        emit_findings(assessment, ITEM_CRITERIA)
     if not review.requirements:
         add("Индивидуальные проверки отсутствуют, поскольку каталог пуст.")
 
     add("4. Проверка набора целиком", "section")
     for key, value in review.whole.checks.items():
         add(f"{SET_CRITERIA[key][0]} — {STATUSES[value]}.")
-    emit_findings(review.whole, "Набор", SET_CRITERIA)
+    emit_findings(review.whole, SET_CRITERIA)
 
     add("5. Сводка", "section")
     counts = Counter(finding.severity for _, _, finding in defects)

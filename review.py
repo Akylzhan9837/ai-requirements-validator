@@ -88,6 +88,7 @@ class Review:
     requirements: tuple[Requirement, ...]
     individual: dict[str, Assessment]
     whole: Assessment
+    duplicates: tuple[tuple[int, int], ...] = ()
 
 
 EVIDENCE_RULES = """
@@ -169,6 +170,28 @@ REVIEW_SET = """
 Для проверки полноты выведи граничные случаи из того, что документ сам задаёт.
 Свяжи каждый системный дефект с конкретными фрагментами документа. individual
 содержит заголовки уже найденных локальных дефектов, чтобы не дублировать их.
+""" + REVIEW_RULES
+
+
+FINAL_REVIEW = """
+Проведи независимую проверку взаимодействия правил. В первую очередь проверь
+все пары общего ограничения на действие для одной сущности или периода и
+локального правила, требующего того же действия после изменения параметра,
+состояния или повторного события. Построй последовательность, где действие
+уже произошло, условие меняется, затем выполняется триггер. Сопоставь область
+действия: сброс локальной истории не означает автоматическую отмену ограничения
+более широкого уровня. Для явного исключения текст должен охватывать тот же
+объект, действие и период, что и общее правило. Если обе трактовки правдоподобны,
+зафиксируй двусмысленность приоритета. Если оба правила применимы и требуют
+несовместимого поведения, зафиксируй противоречие. Дай две отдельные цитаты
+для каждого такого дефекта и конкретную последовательность событий в пояснении.
+Новые findings должны описывать только ещё не отражённые проблемы.
+Затем проверь existing на дубли. Если два дефекта описывают одну причину и
+устраняются одним исправлением, верни пару числовых ключей keep и remove.
+Предпочитай карточку с точными цитатами и ясным объяснением. Один remove нельзя
+указывать дважды или использовать как keep. Разные дефекты одного требования
+сохрани, даже если у них общая цитата. Категория новых дефектов conflict или
+ambiguous. Используй единственный критерий consistent.
 """ + REVIEW_RULES
 
 
@@ -343,4 +366,61 @@ def review_document(document: Document, model: Gemini, progress: Callable[[str],
         assessment_schema(SET_CRITERIA), 26_000,
         lambda data: parse_assessment(data, document, SET_CRITERIA), "Ревью набора", progress,
     )
-    return Review(requirements, individual, whole)
+    return finalize_review(document, model, Review(requirements, individual, whole), progress)
+
+
+def ordered_findings(review: Review) -> list[tuple[str, Finding]]:
+    return [
+        (owner, issue)
+        for owner, assessment in [*review.individual.items(), ("Набор", review.whole)]
+        for issue in assessment.findings
+    ]
+
+
+def finalize_review(document: Document, model: Gemini, review: Review, progress: Callable[[str], None]) -> Review:
+    existing = ordered_findings(review)
+    criteria = {"consistent": SET_CRITERIA["consistent"]}
+    schema = assessment_schema(
+        criteria,
+        duplicates=array(obj(keep={"type": "integer"}, remove={"type": "integer"})),
+    )
+
+    def validate(data: dict) -> Review:
+        interactions = parse_assessment(data, document, criteria)
+        duplicates = {}
+        for row in list_field(data, "duplicates"):
+            keep, remove = row["keep"], row["remove"]
+            if (
+                type(keep) is not int or type(remove) is not int
+                or not 1 <= keep <= len(existing) or not 1 <= remove <= len(existing)
+                or keep == remove or remove in duplicates
+            ):
+                raise ValueError("некорректные номера повторяющихся дефектов")
+            duplicates[remove] = keep
+        if duplicates.keys() & duplicates.values():
+            raise ValueError("основная карточка дефекта не должна удаляться")
+        if any(issue.category not in {"conflict", "ambiguous"} or len(issue.evidence) < 2 for issue in interactions.findings):
+            raise ValueError("для пересечения правил нужны две цитаты и подходящая категория")
+
+        checks = review.whole.checks.copy()
+        if interactions.findings:
+            checks["consistent"] = "fail"
+        whole = Assessment(checks, review.whole.findings + interactions.findings)
+        return Review(review.requirements, review.individual, whole, tuple(duplicates.items()))
+
+    progress("Перепроверяю пересечения правил и повторы дефектов.")
+    return validated_call(
+        model, FINAL_REVIEW,
+        {
+            "document": document.numbered_text(),
+            "existing": [
+                {
+                    "key": index, "owner": owner, "category": issue.category, "title": issue.title,
+                    "explanation": issue.explanation,
+                    "evidence": [{"start": source.start, "end": source.end} for source in issue.evidence],
+                }
+                for index, (owner, issue) in enumerate(existing, 1)
+            ],
+        },
+        schema, 16_000, validate, "Сверка дефектов", progress,
+    )
