@@ -48,6 +48,14 @@ def review_blocks(document: Document, review: Review, passport: Passport) -> lis
     blocks: list[Text | Table] = []
     issues = ordered_findings(review)
     duplicates = dict(review.duplicates)
+    exact = {}
+    roots = [(index, issue) for index, (_, issue) in enumerate(issues, 1) if index not in duplicates]
+    for index, issue in sorted(roots, key=lambda pair: SEVERITY_ORDER[pair[1].severity]):
+        identity = (issue.title.casefold(), issue.category, frozenset(issue.evidence))
+        first = exact.setdefault(identity, index)
+        if first != index:
+            duplicates[index] = first
+    duplicates = {index: duplicates.get(target, target) for index, target in duplicates.items()}
     defects = []
     labels = {}
     for index, (owner, issue) in enumerate(issues, 1):

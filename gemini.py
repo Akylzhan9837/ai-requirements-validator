@@ -48,6 +48,30 @@ def settings(root: Path) -> tuple[str, str]:
     return key, model
 
 
+def quota_retry_delay(error: HTTPError, attempt: int) -> float | None:
+    """Wait for a short-window quota. A daily quota needs a different run."""
+    try:
+        details = json.loads(error.read(65_536)).get("error", {}).get("details", [])
+    except (ValueError, OSError, AttributeError):
+        details = []
+
+    delays = []
+    header = error.headers.get("Retry-After", "")
+    if header.isdecimal():
+        delays.append(float(header))
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        for violation in detail.get("violations", []):
+            if isinstance(violation, dict) and "perday" in str(violation.get("quotaId", "")).lower():
+                return None
+        delay = detail.get("retryDelay")
+        if isinstance(delay, str) and re.fullmatch(r"\d+(?:\.\d+)?s", delay):
+            delays.append(float(delay[:-1]) + 1)
+    delay = max(delays, default=20 * (2 ** attempt))
+    return max(1, delay) if delay <= 120 else None
+
+
 class Gemini:
     def __init__(self, key: str, model: str):
         self.key = key
@@ -74,7 +98,7 @@ class Gemini:
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json", "x-goog-api-key": self.key},
         )
-        for attempt in range(3):
+        for attempt in range(4):
             with self._usage_lock:
                 self.requests += 1
             try:
@@ -82,10 +106,13 @@ class Gemini:
                     result = json.load(response)
                 break
             except HTTPError as exc:
-                retry_after = exc.headers.get("Retry-After", "")
-                delay = int(retry_after) if retry_after.isdecimal() else 4 * (2 ** attempt)
-                if exc.code in {408, 429, 500, 502, 503, 504} and attempt < 2 and delay <= 45:
-                    sleep(max(1, delay))
+                if exc.code == 429 and attempt < 3:
+                    delay = quota_retry_delay(exc, attempt)
+                    if delay is not None:
+                        sleep(delay)
+                        continue
+                elif exc.code in {408, 500, 502, 503, 504} and attempt < 3:
+                    sleep(4 * (2 ** attempt))
                     continue
                 guidance = {
                     400: "проверьте ключ, регион проекта и поддержку структурированных ответов",
@@ -96,7 +123,7 @@ class Gemini:
                 }.get(exc.code, "повторите прогон позже")
                 raise GeminiError(f"Gemini API вернул HTTP {exc.code}: {guidance}") from None
             except (URLError, TimeoutError, ConnectionError):
-                if attempt == 2:
+                if attempt == 3:
                     raise GeminiError("нет соединения с Gemini API или истекло время ожидания") from None
                 sleep(4 * (2 ** attempt))
             except (json.JSONDecodeError, UnicodeError):
