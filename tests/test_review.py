@@ -41,6 +41,13 @@ class ReviewTests(unittest.TestCase):
             "fix": "Указать приоритет правила.", "evidence": evidence,
         }
 
+    def test_markdown_matching_preserves_source_and_rejects_changed_amount(self):
+        document = Document("ТЗ", "spec.md", "digest", (Line("* **Правило:** до 100."), Line("- **Приёмка:** 200.")))
+        source = document.evidence({"start": 1, "end": 2, "quote": "Правило: до 100. Приёмка: 200."})
+        self.assertEqual(source.quote, "Правило:** до 100. - **Приёмка:** 200.")
+        with self.assertRaisesRegex(ValueError, "цитата не совпадает"):
+            document.evidence({"start": 1, "end": 2, "quote": "Правило: до 101. Приёмка: 200."})
+
     def test_retry_keeps_accepted_item_and_rejects_one_sided_conflict(self):
         invalid = self.conflict("correct", self.references[1:])
         valid = self.conflict("correct", self.references)

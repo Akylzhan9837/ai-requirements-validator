@@ -14,6 +14,33 @@ def compact(text: str) -> str:
     return " ".join(text.split())
 
 
+def displayed_markdown(pieces: list[tuple[int, str]]) -> tuple[str, list[int]]:
+    """Read displayed Markdown while retaining offsets into the source."""
+    visible = []
+    cursor = 0
+    for _, piece in pieces:
+        prefix = re.match(r"^(?:[-*+] |#{1,6} )", piece)
+        start = prefix.end() if prefix else 0
+        hidden = set()
+        for marker in re.finditer(r"\*\*[^*\n]+\*\*|`[^`]+`", piece):
+            size = 2 if marker[0].startswith("**") else 1
+            hidden.update(range(marker.start(), marker.start() + size))
+            hidden.update(range(marker.end() - size, marker.end()))
+        for index, char in enumerate(piece):
+            if index < start or index in hidden:
+                continue
+            if char == " " and (not visible or visible[-1][0] == " "):
+                continue
+            visible.append((char, cursor + index))
+        cursor += len(piece)
+        if visible and visible[-1][0] != " ":
+            visible.append((" ", cursor))
+        cursor += 1
+    if visible and visible[-1][0] == " ":
+        visible.pop()
+    return "".join(char for char, _ in visible), [position for _, position in visible]
+
+
 @dataclass(frozen=True)
 class Line:
     text: str
@@ -66,16 +93,25 @@ class Document:
         pieces, haystack, offset = search(start, end)
         if offset < 0:
             pieces, haystack, offset = search(max(1, start - 3), min(len(self.lines), end + 3))
-            if offset < 0 or haystack.find(needle, offset + 1) >= 0:
-                raise ValueError(f"цитата не совпадает с источником в строках {start}–{end}")
+            if offset >= 0 and haystack.find(needle, offset + 1) >= 0:
+                offset = -1
+        limit = offset + len(needle)
+        if offset < 0 and self.name.lower().endswith(".md"):
+            visible, positions = displayed_markdown(pieces)
+            candidate, _ = displayed_markdown([(0, needle)])
+            index = visible.find(candidate) if candidate else -1
+            if index >= 0 and visible.find(candidate, index + 1) < 0:
+                offset, limit = positions[index], positions[index + len(candidate) - 1] + 1
+        if offset < 0:
+            raise ValueError(f"цитата не совпадает с источником в строках {start}–{end}")
         cursor = 0
         actual = []
         for number, text in pieces:
-            if cursor < offset + len(needle) and cursor + len(text) > offset:
+            if cursor < limit and cursor + len(text) > offset:
                 actual.append(number)
             cursor += len(text) + 1
         first, last = actual[0], actual[-1]
-        return Evidence(first, last, haystack[offset : offset + len(needle)], self.location(first, last))
+        return Evidence(first, last, haystack[offset:limit], self.location(first, last))
 
     def location(self, start: int, end: int) -> str:
         first, last = self.lines[start - 1], self.lines[end - 1]
