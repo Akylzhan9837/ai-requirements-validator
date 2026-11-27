@@ -5,7 +5,7 @@
 по критериям ISO/IEC/IEEE 29148:2018 (п. 5.2.5, 5.2.6) и IEEE Std 830-1998 (п. 4.3) и записывает отчёт
 на русском языке в **Markdown и PDF**.
 
-- **Модель:** Google Gemini через бесплатный Google AI Studio API. По умолчанию `gemini-2.5-flash` (меняется в `.env`).
+- **Модель:** Google Gemini через бесплатный Google AI Studio API. По умолчанию `gemini-3.5-flash-lite` (меняется в `.env`).
   При перегрузке модели (503), лимитах (429) или исчерпанном суточном лимите агент **автоматически переключается на
   запасные модели** (см. раздел 2).
 - **Язык:** Python 3.10+.
@@ -22,7 +22,7 @@ pip install -r requirements.txt
 
 # 2) ключ LLM (см. раздел 2): создайте файл .env в корне проекта со строками
 #    GEMINI_API_KEY=ваш_ключ
-#    GEMINI_MODEL=gemini-2.5-flash
+#    GEMINI_MODEL=gemini-3.5-flash-lite
 #    GEMINI_FALLBACK_MODELS=gemini-2.5-flash,gemini-2.5-flash-lite
 
 # 3) прогон одной командой
@@ -46,7 +46,7 @@ python agent.py docs/requirements.md reports/report.md
 3. Создайте в корне проекта файл `.env` и вставьте ключ:
    ```
    GEMINI_API_KEY=ваш_ключ
-   GEMINI_MODEL=gemini-2.5-flash
+   GEMINI_MODEL=gemini-3.5-flash-lite
    GEMINI_FALLBACK_MODELS=gemini-2.5-flash,gemini-2.5-flash-lite
    ```
    Один ключ работает для всех моделей Gemini, отдельный ключ под запасные модели не нужен.
@@ -164,9 +164,3 @@ python -m tests.test_pipeline
 ```
 Прогоняет весь конвейер, генерацию Markdown и PDF на заглушке LLM (включая «грязные» ответы:
 выдуманные цитаты, пропущенные требования). Это проверка кода, **не** отчёт для сдачи.
-
-## 9. Что сдавать
-
-1. Ссылка на репозиторий с этим кодом.
-2. Выданный документ `docs/requirements.md`.
-3. Отчёт, сформированный агентом на этом документе: `reports/report.md` и `reports/report.pdf`.
