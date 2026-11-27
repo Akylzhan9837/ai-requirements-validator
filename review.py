@@ -1,5 +1,6 @@
 """Extract requirements and validate item and whole-document reviews."""
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, TypeVar
 
@@ -37,6 +38,7 @@ CATEGORIES = {
 }
 SEVERITIES = {"critical": "Критичный", "major": "Существенный", "minor": "Малый"}
 STATUSES = {"pass": "Без замечаний", "fail": "Дефект", "na": "Не применимо или недостаточно данных"}
+UNCHECKED_LABEL = "Модель не подтвердила оценку"
 KINDS = {
     "business": "Бизнес-правило",
     "functional": "Функциональное",
@@ -107,7 +109,9 @@ EXTRACT = """
 сценарий приёмки как условие, действие и результат в одном элементе.
 Разделяй независимо проверяемые правила, включая разные предложения под одним ID.
 Сохраняй исходный ID у каждой части, если он действительно присвоен требованию.
-В каждом разделе сопоставь каталог со всеми нормативными строками. Сохрани
+В каждом разделе сопоставь каталог со всеми нормативными строками. Для API
+выделяй правила методов, входных полей, выхода, статусов и ошибок, включая
+таблицы и примеры, если на них держится контракт. Сохрани
 самостоятельные ограничения, условия ошибок и правила пользовательского пути.
 Номера строк, коды HTTP, названия полей и номера шагов не являются ID требований.
 Для отсутствующего ID возвращай пустую строку. Если одна обязанность повторена
@@ -151,6 +155,9 @@ Document содержит полный контекст, включая оста
 границы, исключения и результат для прямо описанного действия.
 Межпунктовые конфликты, пропуски
 сквозных сценариев и согласование нескольких частей оставь для обзора набора.
+Не заявляй локальный конфликт без двух различных цитат. Используй точную цитату
+из target.quote для стороны, относящейся к проверяемому требованию.
+
 """ + REVIEW_RULES
 
 REVIEW_SET = """
@@ -167,7 +174,20 @@ REVIEW_SET = """
 приоритета зафиксируй конфликт или двусмысленность и опиши последовательность.
 Отдельно сверяй цель с измеримым событием и сроком, приёмку с правилами, а в API
 сравни описание операции, способ вызова, фактическое действие и статусы ошибок.
-Для проверки полноты выведи граничные случаи из того, что документ сам задаёт.
+Верификация набора обязательна. Сопоставь каждую строку таблицы приёмки с
+относящимся к ней правилом и ожидаемым наблюдаемым результатом. Отдельно проверь
+переходы через границы периода, разные даты одного события и граничные значения.
+Если ожидаемый результат прямо расходится с базовым правилом, используй
+conflict и critical для ключевого сценария. В такой карточке нужны две
+цитаты: из правила и из ожидаемого результата.
+Проверь покрытие проверками для нижней и верхней границ, смены настройки,
+повторных событий и негативных сценариев. Если документ задаёт поведение,
+но приёмочный сценарий для него отсутствует, сгруппируй недостающее покрытие
+в одну карточку verifiable с цитатой из соответствующего правила и приёмки.
+Для API проверь метод, фактическое действие и примеры ответа, в том числе
+расхождение статуса и полезной нагрузки. Разные представления одного значения
+на входе и выходе могут быть намеренным контрактом. Отсутствие необязательных
+реализационных деталей само по себе не повод считать сценарий непроверяемым.
 Свяжи каждый системный дефект с конкретными фрагментами документа. individual
 содержит заголовки уже найденных локальных дефектов, чтобы не дублировать их.
 """ + REVIEW_RULES
@@ -185,13 +205,20 @@ FINAL_REVIEW = """
 зафиксируй двусмысленность приоритета. Если оба правила применимы и требуют
 несовместимого поведения, зафиксируй противоречие. Дай две отдельные цитаты
 для каждого такого дефекта и конкретную последовательность событий в пояснении.
-Новые findings должны описывать только ещё не отражённые проблемы.
+Дополнительно проверь два типа пропусков: несовместимость расчётного правила
+с конкретным ожидаемым результатом и явно заданное поведение без проверок
+существенных границ или альтернативных сценариев. Для несовместимых формулировок
+нужны обе дословные цитаты. Конфликт в ожидаемом результате ключевой приёмки
+классифицируй critical. Для пробела покрытия ищи нормативное правило и таблицу
+или раздел приёмки. Новую карточку можно дать вместо существующей, если в ней
+добавлены недостающая сторона или более точная классификация. При таком замещении
+индексы новых findings равны existing_count + порядковый номер в findings,
+считая от 1. Укажи индекс новой карточки в keep, старой в remove.
 Затем проверь existing на дубли. Если два дефекта описывают одну причину и
 устраняются одним исправлением, верни пару числовых ключей keep и remove.
 Предпочитай карточку с точными цитатами и ясным объяснением. Один remove нельзя
 указывать дважды или использовать как keep. Разные дефекты одного требования
-сохрани, даже если у них общая цитата. Категория новых дефектов conflict или
-ambiguous. Используй единственный критерий consistent.
+сохрани, даже если у них общая цитата. Используй consistent, verifiable или complete.
 """ + REVIEW_RULES
 
 
@@ -323,15 +350,54 @@ def parse_assessment(
     return Assessment({key: checks[key] for key in criteria}, distinct)
 
 
-def parse_batch(data: dict, document: Document, requirements: tuple[Requirement, ...]) -> dict[str, Assessment]:
-    rows = list_field(data, "items")
-    indexed = {text_field(row, "id"): row for row in rows}
-    if len(rows) != len(requirements) or set(indexed) != {item.id for item in requirements}:
-        raise ValueError("ответ должен содержать по одной проверке на каждый ID из targets")
-    return {
-        item.id: parse_assessment(indexed[item.id], document, ITEM_CRITERIA, item)
-        for item in requirements
-    }
+def review_batch(
+    document: Document, model: Gemini, group: tuple[Requirement, ...],
+    stage: str, progress: Callable[[str], None],
+) -> dict[str, Assessment]:
+    pending = {item.id: item for item in group}
+    accepted = {}
+    schema = obj(items=array(assessment_schema(ITEM_CRITERIA, id=string())))
+    numbered = document.numbered_text()
+    feedback = ""
+
+    for attempt in range(4):
+        progress(f"{stage}: осталось положений {len(pending)}.")
+        data = {
+            "document": numbered, "criteria": ITEM_CRITERIA,
+            "targets": [item.model_data() for item in pending.values()],
+        }
+        errors = {}
+        try:
+            rows = list_field(model.generate(REVIEW_ITEMS + feedback, data, schema, 18_000), "items")
+        except (ValueError, KeyError, TypeError) as exc:
+            rows = []
+            errors["ответ"] = str(exc)
+        for row in rows:
+            identifier = row.get("id")
+            item = pending.get(identifier) if isinstance(identifier, str) else None
+            if item is None:
+                continue
+            try:
+                accepted[item.id] = parse_assessment(row, document, ITEM_CRITERIA, item)
+            except (ValueError, KeyError, TypeError) as exc:
+                errors[item.id] = str(exc)
+            else:
+                del pending[item.id]
+        if not pending:
+            return accepted
+        feedback = (
+            "\nВерни результаты только для текущих targets. "
+            "Для каждой карточки используй дословную цитату из target.quote, если она подтверждает вывод. "
+            "Две разные цитаты обязательны для conflict. Ошибки предыдущего ответа: "
+            f"{errors or 'пропущены обязательные результаты'}."
+        )
+
+    progress(f"{stage}: не удалось подтвердить оценки {', '.join(pending)} после четырёх попыток.")
+    accepted.update({
+        identifier: Assessment(dict.fromkeys(ITEM_CRITERIA, "unchecked"), ())
+        for identifier in pending
+    })
+    return accepted
 
 
 def review_document(document: Document, model: Gemini, progress: Callable[[str], None]) -> Review:
@@ -342,18 +408,19 @@ def review_document(document: Document, model: Gemini, progress: Callable[[str],
         lambda data: parse_inventory(data, document), "Выделение требований", progress,
     )
     progress(f"Выделено положений: {len(requirements)}.")
-    individual = {}
-    groups = (len(requirements) + BATCH_SIZE - 1) // BATCH_SIZE
-    for start in range(0, len(requirements), BATCH_SIZE):
-        group = requirements[start:start + BATCH_SIZE]
-        stage = f"Ревью требований {start // BATCH_SIZE + 1}/{groups}"
-        progress(stage + ".")
-        individual.update(validated_call(
-            model, REVIEW_ITEMS,
-            {"document": numbered, "criteria": ITEM_CRITERIA, "targets": [item.model_data() for item in group]},
-            obj(items=array(assessment_schema(ITEM_CRITERIA, id=string()))), 18_000,
-            lambda data: parse_batch(data, document, group), stage, progress,
-        ))
+    groups = [
+        requirements[start:start + BATCH_SIZE]
+        for start in range(0, len(requirements), BATCH_SIZE)
+    ]
+    completed = {}
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        futures = [
+            workers.submit(review_batch, document, model, group, f"Ревью требований {index}/{len(groups)}", progress)
+            for index, group in enumerate(groups, 1)
+        ]
+        for future in futures:
+            completed.update(future.result())
+    individual = {item.id: completed[item.id] for item in requirements}
 
     progress("Сопоставляю требования по всему документу.")
     whole = validated_call(
@@ -379,7 +446,7 @@ def ordered_findings(review: Review) -> list[tuple[str, Finding]]:
 
 def finalize_review(document: Document, model: Gemini, review: Review, progress: Callable[[str], None]) -> Review:
     existing = ordered_findings(review)
-    criteria = {"consistent": SET_CRITERIA["consistent"]}
+    criteria = {key: SET_CRITERIA[key] for key in ("consistent", "verifiable", "complete")}
     schema = assessment_schema(
         criteria,
         duplicates=array(obj(keep={"type": "integer"}, remove={"type": "integer"})),
@@ -392,19 +459,19 @@ def finalize_review(document: Document, model: Gemini, review: Review, progress:
             keep, remove = row["keep"], row["remove"]
             if (
                 type(keep) is not int or type(remove) is not int
-                or not 1 <= keep <= len(existing) or not 1 <= remove <= len(existing)
+                or not 1 <= keep <= len(existing) + len(interactions.findings)
+                or not 1 <= remove <= len(existing)
                 or keep == remove or remove in duplicates
             ):
                 raise ValueError("некорректные номера повторяющихся дефектов")
             duplicates[remove] = keep
         if duplicates.keys() & duplicates.values():
             raise ValueError("основная карточка дефекта не должна удаляться")
-        if any(issue.category not in {"conflict", "ambiguous"} or len(issue.evidence) < 2 for issue in interactions.findings):
-            raise ValueError("для пересечения правил нужны две цитаты и подходящая категория")
-
         checks = review.whole.checks.copy()
-        if interactions.findings:
-            checks["consistent"] = "fail"
+        for issue in interactions.findings:
+            if issue.criterion == "consistent" and len(issue.evidence) < 2:
+                raise ValueError("для пересечения правил нужны две разные цитаты")
+            checks[issue.criterion] = "fail"
         whole = Assessment(checks, review.whole.findings + interactions.findings)
         return Review(review.requirements, review.individual, whole, tuple(duplicates.items()))
 
@@ -413,11 +480,15 @@ def finalize_review(document: Document, model: Gemini, review: Review, progress:
         model, FINAL_REVIEW,
         {
             "document": document.numbered_text(),
+            "existing_count": len(existing),
             "existing": [
                 {
                     "key": index, "owner": owner, "category": issue.category, "title": issue.title,
-                    "explanation": issue.explanation,
-                    "evidence": [{"start": source.start, "end": source.end} for source in issue.evidence],
+                    "explanation": issue.explanation, "severity": issue.severity,
+                    "evidence": [
+                        {"start": source.start, "end": source.end, "quote": source.quote}
+                        for source in issue.evidence
+                    ],
                 }
                 for index, (owner, issue) in enumerate(existing, 1)
             ],

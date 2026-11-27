@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+from threading import Lock
 from time import sleep
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -53,6 +54,7 @@ class Gemini:
         self.model = model
         self.versions: set[str] = set()
         self.requests = 0
+        self._usage_lock = Lock()
 
     def generate(self, prompt: str, data: dict, schema: dict, max_tokens: int) -> dict:
         payload = {
@@ -73,7 +75,8 @@ class Gemini:
             headers={"Content-Type": "application/json", "x-goog-api-key": self.key},
         )
         for attempt in range(3):
-            self.requests += 1
+            with self._usage_lock:
+                self.requests += 1
             try:
                 with urlopen(request, timeout=180) as response:
                     result = json.load(response)
@@ -110,5 +113,6 @@ class Gemini:
         if not isinstance(parsed, dict):
             raise ModelResponseError("Gemini вернул JSON неверного типа")
         if isinstance(result.get("modelVersion"), str):
-            self.versions.add(result["modelVersion"])
+            with self._usage_lock:
+                self.versions.add(result["modelVersion"])
         return parsed

@@ -15,7 +15,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont, TTFError
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, TableStyle
 
-from review import CATEGORIES, ITEM_CRITERIA, KINDS, SET_CRITERIA, SEVERITIES, STATUSES, Assessment, Review, ordered_findings
+from review import CATEGORIES, ITEM_CRITERIA, KINDS, SET_CRITERIA, SEVERITIES, STATUSES, UNCHECKED_LABEL, Assessment, Review, ordered_findings
 from source import Document
 
 
@@ -112,7 +112,7 @@ def review_blocks(document: Document, review: Review, passport: Passport) -> lis
         add(f"{item.id} · {item.summary}", "subheading")
         add(f"{item.source.location} · «{item.source.quote}»", "quote")
         assessment = review.individual[item.id]
-        for status, label in STATUSES.items():
+        for status, label in {**STATUSES, "unchecked": UNCHECKED_LABEL}.items():
             names = [ITEM_CRITERIA[key][0] for key, value in assessment.checks.items() if value == status]
             if names:
                 add(f"{label}: {', '.join(names)}.")
@@ -127,7 +127,10 @@ def review_blocks(document: Document, review: Review, passport: Passport) -> lis
 
     add("5. Сводка", "section")
     counts = Counter(finding.severity for _, _, finding in defects)
+    unchecked = [identifier for identifier, assessment in review.individual.items() if "unchecked" in assessment.checks.values()]
     add(f"Выделено положений: {len(review.requirements)}.")
+    if unchecked:
+        add(f"Не подтверждена индивидуальная оценка для {len(unchecked)} положений: {', '.join(unchecked)}.")
     add(
         f"Всего нарушений: {len(defects)}. Критичных: {counts['critical']}. "
         f"Существенных: {counts['major']}. Малых: {counts['minor']}."
@@ -147,6 +150,8 @@ def review_blocks(document: Document, review: Review, passport: Passport) -> lis
     elif critical:
         add("Разработка: отложить реализацию затронутых сценариев до устранения критичных дефектов.")
         add("Тестирование: можно подготовить черновики сценариев. Утвердить ожидаемые результаты и начать приёмку можно после исправлений.")
+    elif unchecked:
+        add("Готовность не установлена. Сначала завершите проверку положений без подтверждённой оценки.")
     elif counts["major"]:
         add("Разработка: можно начать работу над согласованными сценариями. Уточните правила, затронутые существенными дефектами.")
         add("Тестирование: можно проектировать проверки согласованных сценариев. В затронутых сценариях сначала утвердите ожидаемые результаты.")
