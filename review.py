@@ -219,7 +219,7 @@ FINAL_REVIEW = """
 Предпочитай карточку с точными цитатами и ясным объяснением. Один remove нельзя
 указывать дважды или использовать как keep. Разные дефекты одного требования
 сохрани, даже если у них общая цитата. Используй consistent, verifiable или complete.
-""" + REVIEW_RULES
+""" + REVIEW_RULES + "\nВердикты по критериям вычислит программа из findings. Поле checks не требуется."
 
 
 def string(choices: dict | None = None) -> dict:
@@ -452,8 +452,18 @@ def finalize_review(document: Document, model: Gemini, review: Review, progress:
         duplicates=array(obj(keep={"type": "integer"}, remove={"type": "integer"})),
     )
 
+    schema["properties"].pop("checks")
+    schema["required"].remove("checks")
+
     def validate(data: dict) -> Review:
-        interactions = parse_assessment(data, document, criteria)
+        findings = list_field(data, "findings")
+        checks = dict.fromkeys(criteria, "pass")
+        for finding in findings:
+            criterion = text_field(finding, "criterion")
+            if criterion not in checks:
+                raise ValueError("недопустимый критерий финальной сверки")
+            checks[criterion] = "fail"
+        interactions = parse_assessment({"checks": checks, "findings": findings}, document, criteria)
         duplicates = {}
         for row in list_field(data, "duplicates"):
             keep, remove = row["keep"], row["remove"]

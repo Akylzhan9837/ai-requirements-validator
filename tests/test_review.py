@@ -89,7 +89,6 @@ class ReviewTests(unittest.TestCase):
 
         model = Mock()
         model.generate.return_value = {
-            "checks": {"consistent": "fail", "verifiable": "pass", "complete": "pass"},
             "findings": [self.conflict("consistent", self.references)],
             "duplicates": [{"keep": 2, "remove": 1}],
         }
